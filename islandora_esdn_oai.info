@@ -1,0 +1,10 @@
+name = Islandora OAI ESDN Handler
+description = "OAI 2 Handler for Islandora OAI with deleted Objects register"
+dependencies[] = islandora_solr
+dependencies[] = islandora
+dependencies[] = islandora_oai
+configure = admin/islandora/tools/islandora-esdn-oai/handler/
+version = 7.x-dev
+core = 7.x
+package = Islandora Tools
+

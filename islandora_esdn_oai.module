@@ -1,0 +1,194 @@
+<?php
+
+/**
+ * @file
+ * Module that provides a more complete OAI response.
+ */
+
+
+/**
+ * Implements hook_menu().
+ */
+function islandora_esdn_oai_menu() {
+  $items = array();
+ 
+  $items['admin/islandora/tools/islandora-esdn-oai/handler'] = array(
+    'title' => 'Settings',
+    'description' => 'Configure the Islandora ESDN OAI request handler',
+    'file' => 'includes/handler.admin.inc',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('islandora_esdn_oai_handler_configuration_form'),
+    'access arguments' => array(ISLANDORA_OAI_ADMINISTER_PERMISSION),
+  );
+  return $items;
+}
+
+/**
+* Implements hook_islandora_object_alter().
+*/
+function islandora_esdn_oai_islandora_object_alter(AbstractObject $object, array &$context) {
+  // Store a DB basic representation of an object it the action is 'purge'
+  if ($context['action'] == 'purge' && variable_get('islandora_esdn_oai_keep_tombstone', FALSE)) {
+    module_load_include('inc', 'islandora', 'includes/utilities');
+    $pid = $object->id;
+    $models = $object->models;
+    
+    $parents = array();
+    //We need only those that can be translated to "set" members
+    $parents['isMemberOfCollection'] = $object->relationships->get(FEDORA_RELS_EXT_URI, 'isMemberOfCollection');
+    $parents['isMemberOf'] = $object->relationships->get(FEDORA_RELS_EXT_URI, 'isMemberOf');
+    $timestamp_deleted = time();
+    //Create a permanent register of the purged object in DB 
+    $exists = db_query('SELECT 1 FROM {islandora_esdn_oai_tombstones} WHERE pid = :pid', array(':pid' => $pid))->fetchField();
+    if (!$exists) {
+      $insert = db_insert('islandora_esdn_oai_tombstones')
+        ->fields(array(
+          'pid' => $pid,
+          'parent_collections' => serialize($parents),
+          'cmodels' => serialize($models),
+          'timestamp_deleted' => $timestamp_deleted,
+        ));
+      $insert->execute(); 
+    }
+    else {
+      // Not sure if we should keep on going here...
+      // This could mean PID recycling or passing from D state to A and back? 
+      watchdog('islandora esdn oai', 'Storing record of Deleted object for OAI but found existing one for same PID: @pid', array('@pid' => $pid), WATCHDOG_INFO);
+      db_update('islandora_esdn_oai_tombstones')
+        ->fields(array(
+          'timestamp_deleted' => $timestamp_deleted,
+        ))
+        ->condition('pid', $pid)
+        ->execute();
+    }
+  }
+}
+
+
+/**
+* Implements hook_islandora_object_purged().
+*/
+function islandora_esdn_oai_islandora_object_purged($pid) {
+
+  if (variable_get('islandora_esdn_oai_keep_tombstone', FALSE)) {
+    // We will first create a permanent record of the deleted object in DB
+    // Record deleted timestap here
+    error_log('purging in oai after purge?');
+
+    // Select permanent register of the purged object from DB
+    // @see islandora_esdn_oai_islandora_object_alter
+    $query = db_select('islandora_esdn_oai_tombstones', 'n');
+    $query->condition('n.pid', $pid, '=')
+      ->fields('n', array('parent_collections', 'cmodels', 'timestamp_deleted'))
+      ->range(0,1);
+    $dbresult = $query->execute();
+    error_log($dbresult->rowCount());
+    if ($dbresult->rowCount()) {
+      $dbrecord = $dbresult->fetchAssoc();
+      error_log(print_r($dbrecord,true));
+      $timestamp_deleted = $dbrecord['timestamp_deleted'];
+      // We need to unserialize parent_collections and cmodels, they come from blob
+      $parent_collections = unserialize($dbrecord['parent_collections']);
+      $cmodels = unserialize($dbrecord['cmodels']);
+
+
+      //Then we will create a document identified by fake PID for this object in Solr
+     
+      if (variable_get('islandora_esdn_oai_create_tombstone_solr', FALSE)) {
+        error_log('ok');
+        module_load_include('inc', 'islandora_oai', 'includes/handler');
+        $namespace = variable_get('islandora_esdn_oai_tombstone_namespace','deletedobjectsrepublic');
+        $path_parts = parse_url(variable_get('islandora_solr_url', 'localhost:8080/solr'));
+        
+           error_log('ok2');
+          $newpid = utf8_encode($namespace.":".sha1($pid));
+          $newpid = htmlspecialchars($newpid, ENT_NOQUOTES, 'UTF-8');
+          $rawPost = '<add>';
+          $rawPost .= '<doc>';
+          $rawPost .= '<field name="PID">'.$newpid.'</field>';
+          $rawPost .= '<field name="siteName">huho</field>';
+          $rawPost .= '<field name="PID_fullurl">http://localhost/~dpino/biodiversidad/islandora/object/'.$newpid.'</field>';
+          $rawPost .= '<field name="old_PID">'.htmlspecialchars(utf8_encode($pid),ENT_NOQUOTES, 'UTF-8').'</field>';
+          $rawPost .= '<field name="'.variable_get('islandora_oai_date_field', 'fgs_lastModifiedDate_dt').
+            '">'.gmdate('Y-m-d\TH:i:s\Z', $timestamp_deleted).'</field>';
+          $rawPost .= '<field name="tombstone">1</field>';
+          // Now create membership predicates
+          $membership_fields = islandora_oai_get_membership_array();
+          error_log('ok3');
+          foreach($parent_collections as $predicate => $parentdef) {
+            if (count($parentdef) > 0) {
+              // This is clearly a naive way of handling this
+              // @TODO add a new config setting to match solr field to predicate
+              foreach ($parentdef as $def) {
+                error_log(print_r($def,true));
+                $rawPost .= '<field name="RELS_EXT_'.$predicate.'_uri_ms">'.htmlspecialchars(utf8_encode('info:fedora/'.$def['object']['value']),ENT_NOQUOTES, 'UTF-8').'</field>';
+              }
+            }
+          }
+          error_log('ok4');
+          // CMODEL membership 
+          foreach($cmodels as $cmodel) {
+            $rawPost .= '<field name="'.variable_get('islandora_oai_content_model_field', 'RELS_EXT_hasModel_uri_ms').'">'.htmlspecialchars(utf8_encode('info:fedora/'.$cmodel),ENT_NOQUOTES, 'UTF-8').'</field>';
+          }
+           error_log('ok5');
+          $rawPost .= '</doc>';
+          $rawPost .= '</add>';
+          error_log($rawPost);
+        try {  
+          $solr = new Apache_Solr_Service($path_parts['host'], $path_parts['port'], $path_parts['path'] . '/');
+          $results = $solr->add($rawPost,$timeout = 3600);
+        }
+        catch (Exception $e) {
+          drupal_set_message(t('Error creating Solr Tombstone document with new id %newpid for PID %pid, error message: %error_message',array('%newpid'=>$newpid,'%pid'=>$pid, '%error_message' => $e->getMessage())), 'error');
+        }
+        if (isset($results)) {
+          $solr_results = json_decode($results->getRawResponse(), TRUE);
+          if ($solr_results['responseHeader']['status'] == 0) {
+            drupal_set_message(t('Solr Tombstone created with id: %newpid for deleted object pid: %pid',array('%newpid'=>$newpid,'%pid'=>$pid)),'status');
+          }
+          else {
+            drupal_set_message(t('An error with code %code happened when trying to create Solr Tombstone with document id: %newpid for object pid: %pid ',array('%code'=>$solr_results['responseHeader']['status'],'%newpid'=>$newpid,'%pid'=>$pid)),'error');
+          }
+        }
+      }
+    }
+  }
+}
+/**
+ * Implements hook_islandora_oai_identify_request_handler().
+ */
+function islandora_esdn_oai_islandora_oai_identify_request_handler() {
+  return array(
+    'islandora_esdn_oai' => array(
+      'label' => t('Islandora ESDN OAI'),
+      'description' => t('Provides a deleted Objects aware OAI implementation for Islandora/Empire State Digital Network.'),
+      'configuration' => 'admin/islandora/tools/islandora-esdn-oai/handler',
+      'requests' => array(
+        'ListIdentifiers' => array(
+          'file' => drupal_get_path('module', 'islandora_esdn_oai') . '/includes/handler.inc',
+          'function' => 'islandora_esdn_oai_retrieve_records_or_identifiers',
+        ),
+        'ListRecords' => array(
+          'file' => drupal_get_path('module', 'islandora_esdn_oai') . '/includes/handler.inc',
+          'function' => 'islandora_esdn_oai_retrieve_records_or_identifiers',
+        ),
+        'ListSets' => array(
+          'file' => drupal_get_path('module', 'islandora_esdn_oai') . '/includes/handler.inc',
+          'function' => 'islandora_esdn_oai_retrieve_sets',
+        ),
+        'GetRecord' => array(
+          'file' => drupal_get_path('module', 'islandora_esdn_oai') . '/includes/handler.inc',
+          'function' => 'islandora_esdn_oai_retrieve_record',
+        ),
+        'response_xml' => array(
+          'file' => drupal_get_path('module', 'islandora_esdn_oai') . '/includes/handler.inc',
+          'function' => 'islandora_esdn_oai_object_response_xml',
+        ),
+        'set_membership' => array(
+          'file' => drupal_get_path('module', 'islandora_esdn_oai') . '/includes/handler.inc',
+          'function' => 'islandora_esdn_oai_get_membership',
+        ),
+      ),
+    ),
+  );
+}

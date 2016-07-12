@@ -1,0 +1,68 @@
+<?PHP
+
+/**
+ * @file
+ * Installs required DB tables and default metadata prefixes for islandora_oai.
+ */
+
+/**
+ * Implements hook_install().
+ */
+function islandora_esdn_oai_install() {
+}
+
+/**
+ * Implements hook_schema().
+ */
+function islandora_esdn_oai_schema() {
+  $schema = array();
+
+  $schema['islandora_esdn_oai_tombstones'] = array(
+        'description' => 'Keeps track of deleted Islandora Objects.',
+        'fields' => array(
+          'pid' => array(
+            'type' => 'varchar',
+            'length' => 64,
+            'not null' => TRUE,
+            'default' => '',
+            'description' => 'Original Islandora PID',
+          ),
+          'parent_collections' => array(
+            'type' => 'blob',
+            'not null' => false,
+           'size' => 'big',
+            'serialize' => TRUE,
+            'description' => 'serialized parent PIDs',
+          ),
+          'cmodels' => array(
+            'type' => 'blob',
+            'not null' => false,
+            'size' => 'big',
+            'serialize' => TRUE,
+            'description' => 'serialized cmodels',
+          ),
+          'timestamp_deleted' => array(
+            'type' => 'int',
+            'not null' => TRUE,
+            'default' => 0,
+            'description' => 'Date the object was deleted',
+          ),
+        ),
+        'primary key' => array('pid'),
+      );
+  return $schema;
+
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function islandora_esdn_oai_uninstall() {
+ 
+  $variables = array(
+    'islandora_esdn_oai_keep_tombstone',
+    'islandora_esdn_oai_tombstone_namespace',
+    'islandora_esdn_oai_create_tombstone_solr',
+  );
+  array_walk($variables, 'variable_del');
+}
