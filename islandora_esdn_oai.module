@@ -69,11 +69,10 @@ function islandora_esdn_oai_islandora_object_alter(AbstractObject $object, array
 * Implements hook_islandora_object_purged().
 */
 function islandora_esdn_oai_islandora_object_purged($pid) {
-
+  global $base_url;
   if (variable_get('islandora_esdn_oai_keep_tombstone', FALSE)) {
     // We will first create a permanent record of the deleted object in DB
     // Record deleted timestap here
-    error_log('purging in oai after purge?');
 
     // Select permanent register of the purged object from DB
     // @see islandora_esdn_oai_islandora_object_alter
@@ -82,58 +81,52 @@ function islandora_esdn_oai_islandora_object_purged($pid) {
       ->fields('n', array('parent_collections', 'cmodels', 'timestamp_deleted'))
       ->range(0,1);
     $dbresult = $query->execute();
-    error_log($dbresult->rowCount());
+
     if ($dbresult->rowCount()) {
       $dbrecord = $dbresult->fetchAssoc();
-      error_log(print_r($dbrecord,true));
+
       $timestamp_deleted = $dbrecord['timestamp_deleted'];
       // We need to unserialize parent_collections and cmodels, they come from blob
       $parent_collections = unserialize($dbrecord['parent_collections']);
       $cmodels = unserialize($dbrecord['cmodels']);
 
-
       //Then we will create a document identified by fake PID for this object in Solr
      
       if (variable_get('islandora_esdn_oai_create_tombstone_solr', FALSE)) {
-        error_log('ok');
         module_load_include('inc', 'islandora_oai', 'includes/handler');
         $namespace = variable_get('islandora_esdn_oai_tombstone_namespace','deletedobjectsrepublic');
         $path_parts = parse_url(variable_get('islandora_solr_url', 'localhost:8080/solr'));
         
-           error_log('ok2');
           $newpid = utf8_encode($namespace.":".sha1($pid));
           $newpid = htmlspecialchars($newpid, ENT_NOQUOTES, 'UTF-8');
           $rawPost = '<add>';
           $rawPost .= '<doc>';
           $rawPost .= '<field name="PID">'.$newpid.'</field>';
-          $rawPost .= '<field name="siteName">huho</field>';
-          $rawPost .= '<field name="PID_fullurl">http://localhost/~dpino/biodiversidad/islandora/object/'.$newpid.'</field>';
+          $rawPost .= '<field name="siteName">'.$base_url.'</field>';
+          $rawPost .= '<field name="PID_fullurl">'.$base_url.base_path().'/islandora/object/'.$newpid.'</field>';
           $rawPost .= '<field name="oai_real_PID">'.htmlspecialchars(utf8_encode($pid),ENT_NOQUOTES, 'UTF-8').'</field>';
           $rawPost .= '<field name="'.variable_get('islandora_oai_date_field', 'fgs_lastModifiedDate_dt').
             '">'.gmdate('Y-m-d\TH:i:s\Z', $timestamp_deleted).'</field>';
           $rawPost .= '<field name="tombstone">1</field>';
           // Now create membership predicates
           $membership_fields = islandora_oai_get_membership_array();
-          error_log('ok3');
+
           foreach($parent_collections as $predicate => $parentdef) {
             if (count($parentdef) > 0) {
               // This is clearly a naive way of handling this
               // @TODO add a new config setting to match solr field to predicate
               foreach ($parentdef as $def) {
-                error_log(print_r($def,true));
                 $rawPost .= '<field name="RELS_EXT_'.$predicate.'_uri_ms">'.htmlspecialchars(utf8_encode('info:fedora/'.$def['object']['value']),ENT_NOQUOTES, 'UTF-8').'</field>';
               }
             }
           }
-          error_log('ok4');
-          // CMODEL membership 
+
+          // CMODEL membership
           foreach($cmodels as $cmodel) {
             $rawPost .= '<field name="'.variable_get('islandora_oai_content_model_field', 'RELS_EXT_hasModel_uri_ms').'">'.htmlspecialchars(utf8_encode('info:fedora/'.$cmodel),ENT_NOQUOTES, 'UTF-8').'</field>';
           }
-           error_log('ok5');
           $rawPost .= '</doc>';
           $rawPost .= '</add>';
-          error_log($rawPost);
         try {  
           $solr = new Apache_Solr_Service($path_parts['host'], $path_parts['port'], $path_parts['path'] . '/');
           $results = $solr->add($rawPost,$timeout = 3600);
