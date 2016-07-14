@@ -412,8 +412,8 @@ function islandora_esdn_oai_query_solr($start = 0, $query = array(), $set = NULL
       }
      $querystring = implode(' OR ', $query);
   }
-  $query_processor->buildQuery($querystring);
-
+  // display as fake as it gets
+  $query_processor->buildQuery($querystring, array('display' => 'OAI ESDN')); 
   $fl_fields = islandora_esdn_oai_get_membership_array();
   $fl_fields[] = 'PID';
   $fl_fields[] = variable_get('islandora_oai_date_field', 'fgs_lastModifiedDate_dt');
