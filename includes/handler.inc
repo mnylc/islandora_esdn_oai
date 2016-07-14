@@ -71,11 +71,11 @@ EOQ;
  *   XML string output of the record depending on configuration, NULL if an
  *   error was encountered.
  *
- * @see hook_islandora_esdn_oai_identify_request_handler()
+ * @see hook_islandora_oai_identify_request_handler()
  */
 function islandora_esdn_oai_object_response_xml($params) {
   $object = islandora_object_load($params['pid']);
-  $param = variable_get("islandora_esdn_oai_metadata_datastream_id_{$params['metadata_prefix']}", 'DC');
+  $param = variable_get("islandora_oai_metadata_datastream_id_{$params['metadata_prefix']}", 'DC');
   if (isset($object[$param])) {
     $content = $object[$param]->content;
   }
@@ -85,7 +85,7 @@ function islandora_esdn_oai_object_response_xml($params) {
 
   $oai_output = NULL;
   if (!empty($content)) {
-    $self_transform_file = variable_get("islandora_esdn_oai_self_transform_file_{$params['metadata_prefix']}", 'default');
+    $self_transform_file = variable_get("islandora_oai_self_transform_file_{$params['metadata_prefix']}", 'default');
     if ($self_transform_file != 'default') {
       $self_xslt = new XSLTProcessor();
       $self_xsl = new DOMDocument();
@@ -93,7 +93,7 @@ function islandora_esdn_oai_object_response_xml($params) {
       $self_input = new DOMDocument();
       $self_input->loadXML($content);
       $self_xslt->importStylesheet($self_xsl);
-      $self_transform_params = module_invoke_all('islandora_esdn_oai_self_transform_params', $object, $params['metadata_prefix']);
+      $self_transform_params = module_invoke_all('islandora_oai_self_transform_params', $object, $params['metadata_prefix']);
       foreach ($self_transform_params as $namespace_uri => $transform_params) {
         $self_xslt->setParameter($namespace_uri, $transform_params);
       }
@@ -103,7 +103,7 @@ function islandora_esdn_oai_object_response_xml($params) {
 
     $xslt = new XSLTProcessor();
     $xsl = new DOMDocument();
-    $file = variable_get("islandora_esdn_oai_transform_file_{$params['metadata_prefix']}", 'default');
+    $file = variable_get("islandora_oai_transform_file_{$params['metadata_prefix']}", 'default');
     if ($file != 'default') {
       $xsl->load($file);
       $input = new DOMDocument();
@@ -124,7 +124,7 @@ function islandora_esdn_oai_object_response_xml($params) {
     }
   }
   // Jam the dc.identifier.thumbnail into the OAI_DC output.
-  if (isset($object['TN']) && variable_get('islandora_esdn_oai_append_dc_thumbnail', FALSE) && $params['metadata_prefix'] == 'oai_dc' && !empty($oai_output) && islandora_datastream_access(ISLANDORA_VIEW_OBJECTS, $object['TN'])) {
+  if (isset($object['TN']) && variable_get('islandora_oai_append_dc_thumbnail', FALSE) && $params['metadata_prefix'] == 'oai_dc' && !empty($oai_output) && islandora_datastream_access(ISLANDORA_VIEW_OBJECTS, $object['TN'])) {
     $thumb_url = url("islandora/object/{$object->id}/datastream/TN/view/{$object->label}.jpg", array(
       'absolute' => TRUE,
       'language' => NULL,
@@ -135,20 +135,20 @@ function islandora_esdn_oai_object_response_xml($params) {
     $oai_output = $dom->saveXML($dom->documentElement);
   }
 
-  if (variable_get("islandora_esdn_oai_include_object_links_for_{$params['metadata_prefix']}", FALSE) && !empty($oai_output)) {
+  if (variable_get("islandora_oai_include_object_links_for_{$params['metadata_prefix']}", FALSE) && !empty($oai_output)) {
     // See if we need to XPath to a specific spot to add it.
     $dom = new DOMDocument();
     $dom->loadXML($oai_output);
-    $results = db_query('SELECT * FROM {islandora_esdn_oai_metadata_formats} WHERE metadata_prefix = :metadata_prefix', array(':metadata_prefix' => $params['metadata_prefix']));
+    $results = db_query('SELECT * FROM {islandora_oai_metadata_formats} WHERE metadata_prefix = :metadata_prefix', array(':metadata_prefix' => $params['metadata_prefix']));
     $record = $results->fetchObject();
 
     $object_url = url("islandora/object/{$object->id}", array(
       'absolute' => TRUE,
       'language' => NULL,
     ));
-    $xpath = variable_get("islandora_esdn_oai_object_links_for_{$params['metadata_prefix']}_xpath", '');
-    $field = variable_get("islandora_esdn_oai_object_links_for_{$params['metadata_prefix']}_field", '');
-    $record_namespace = variable_get("islandora_esdn_oai_object_links_for_{$params['metadata_prefix']}_record_namespace", FALSE);
+    $xpath = variable_get("islandora_oai_object_links_for_{$params['metadata_prefix']}_xpath", '');
+    $field = variable_get("islandora_oai_object_links_for_{$params['metadata_prefix']}_field", '');
+    $record_namespace = variable_get("islandora_oai_object_links_for_{$params['metadata_prefix']}_record_namespace", FALSE);
 
     if ($xpath) {
       $dom_xpath = new DOMXPath($dom);
@@ -222,12 +222,12 @@ function islandora_esdn_oai_object_response_xml($params) {
  *   -date (string): The date timestamp of the record.
  *   -solr_doc (array): The Solr doc for the record.
  *
- * @see hook_islandora_esdn_oai_identify_request_handler()
+ * @see hook_islandora_oai_identify_request_handler()
  */
 function islandora_esdn_oai_retrieve_record($params) {
   $pid = $params['pid'];
   $record = FALSE;
-  $results = islandora_esdn_oai_query_solr(0, 'PID', $pid);
+  $results = islandora_esdn_oai_query_solr(0, array('PID' => $pid, 'oai_real_PID' => $pid));
   if ($results['numFound'] > 0) {
     $solr_object = $results['objects'][0];
     $record = islandora_esdn_oai_construct_record_from_solr_response($solr_object);
@@ -248,7 +248,7 @@ function islandora_esdn_oai_retrieve_record($params) {
  * @return array
  *   An array containing all set pids that this record belongs to.
  *
- * @see hook_islandora_esdn_oai_identify_request_handler()
+ * @see hook_islandora_oai_identify_request_handler()
  */
 function islandora_esdn_oai_get_membership($params) {
   $sets = array();
@@ -283,12 +283,11 @@ function islandora_esdn_oai_retrieve_records_or_identifiers($params) {
   $from = $params['from'];
   $until = $params['until'];
   $token = $params['token'];
-  $field = 'PID';
-  $query = NULL;
+  $query = array();
   $date_query = NULL;
 
   if ($from || $until) {
-    $field = variable_get('islandora_esdn_oai_date_field', 'fgs_lastModifiedDate_dt');
+    $field= variable_get('islandora_oai_date_field', 'fgs_lastModifiedDate_dt');
 
     if ($from) {
       $solr_from = islandora_esdn_oai_datetime_to_solr_time($from);
@@ -309,7 +308,7 @@ function islandora_esdn_oai_retrieve_records_or_identifiers($params) {
   if (!isset($set)) {
     $set = NULL;
   }
-  $results = islandora_esdn_oai_query_solr($token->deliveredrecords, $field, $query, $set, $date_query);
+  $results = islandora_esdn_oai_query_solr($token->deliveredrecords, $query, $set, $date_query);
   foreach ($results['objects'] as $solr_object) {
     $records[] = islandora_esdn_oai_construct_record_from_solr_response($solr_object);
   }
@@ -329,10 +328,12 @@ function islandora_esdn_oai_retrieve_records_or_identifiers($params) {
  *   An array describing the record retrieved from Solr.
  */
 function islandora_esdn_oai_construct_record_from_solr_response($solr_object) {
+  $pidtoreturn = isset($solr_object['solr_doc']['oai_real_PID']) ? (array) $solr_object['solr_doc']['oai_real_PID'] : (array) $solr_object['PID'];
   return array(
-    'pid' => $solr_object['PID'],
-    'date' => $solr_object['solr_doc'][variable_get('islandora_esdn_oai_date_field', 'fgs_lastModifiedDate_dt')],
+    'pid' => reset($pidtoreturn),
+    'date' => $solr_object['solr_doc'][variable_get('islandora_oai_date_field', 'fgs_lastModifiedDate_dt')],
     'solr_doc' => $solr_object['solr_doc'],
+    'tombstone' => isset($solr_object['solr_doc']['tombstone']) ? TRUE : FALSE,
   );
 }
 
@@ -386,10 +387,8 @@ function islandora_esdn_oai_datetime_to_solr_time($datetime, $until = FALSE) {
  *
  * @param int $start
  *   The starting point for Solr queries, mainly used for resumption tokens.
- * @param string $field
- *   Field which we are using to query Solr.
- * @param string $query
- *   Query string to search for.
+ * @param array $query
+ *   Associative array in the form of key = field; value = condition
  * @param bool $set
  *   Whether we are querying down for a set which requires walking in ITQL land.
  * @param bool $date_query
@@ -398,24 +397,29 @@ function islandora_esdn_oai_datetime_to_solr_time($datetime, $until = FALSE) {
  * @return array
  *   The results generated from the crafted Solr query.
  */
-function islandora_esdn_oai_query_solr($start = 0, $field = 'PID', $query = NULL, $set = NULL, $date_query = NULL) {
+function islandora_esdn_oai_query_solr($start = 0, $query = array(), $set = NULL, $date_query = NULL) {
   global $user;
 
   $query_processor = new IslandoraSolrQueryProcessor();
 
   // Build the query string.
-  if (empty($query)) {
-    $query = '*:*';
+  if (count($query) == 0) {
+    $querystring = '*:*';
   }
   else {
-    $query = $field . ':' . Apache_Solr_Service::escape($query);
+    foreach($query as $field => &$value) {
+      $value = $field . ':' . Apache_Solr_Service::escape($value);
+      }
+     $querystring = implode(' OR ', $query);
   }
-
-  $query_processor->buildQuery($query);
+  $query_processor->buildQuery($querystring);
 
   $fl_fields = islandora_esdn_oai_get_membership_array();
   $fl_fields[] = 'PID';
-  $fl_fields[] = variable_get('islandora_esdn_oai_date_field', 'fgs_lastModifiedDate_dt');
+  $fl_fields[] = variable_get('islandora_oai_date_field', 'fgs_lastModifiedDate_dt');
+  //Tombstone only fields
+  $fl_fields[] = 'oai_real_PID';
+  $fl_fields[] = 'tombstone';
   $query_processor->solrParams['fl'] = implode(',', $fl_fields);
 
   if ($date_query) {
@@ -423,7 +427,7 @@ function islandora_esdn_oai_query_solr($start = 0, $field = 'PID', $query = NULL
   }
 
   $exclude_content_models = islandora_esdn_oai_get_restricted_models();
-  $has_model = variable_get('islandora_esdn_oai_content_model_field', 'RELS_EXT_hasModel_uri_ms');
+  $has_model = variable_get('islandora_oai_content_model_field', 'RELS_EXT_hasModel_uri_ms');
   foreach ($exclude_content_models as $content_model) {
     $content_model = trim($content_model);
     if ($content_model) {
@@ -576,7 +580,7 @@ EOQ;
     $query_processor->solrParams['fq'][] = '(' . implode(' OR ', $set_fq) . ')';
   }
   $query_processor->solrStart = $start;
-  $query_processor->solrLimit = variable_get('islandora_esdn_oai_max_size', '20');
+  $query_processor->solrLimit = variable_get('islandora_oai_max_size', '20');
   try {
     $query_processor->executeQuery(FALSE);
     $solr_results = $query_processor->islandoraSolrResult['response'];
@@ -598,7 +602,7 @@ function islandora_esdn_oai_get_membership_array() {
   $mini_cache = &drupal_static(__FUNCTION__, array());
 
   if (empty($mini_cache)) {
-    foreach (preg_split('/(\\r?\\n|\\r)+/', variable_get('islandora_esdn_oai_collection_field', "RELS_EXT_isMemberOfCollection_uri_ms\nRELS_EXT_isMemberOf_uri_ms")) as $spec) {
+    foreach (preg_split('/(\\r?\\n|\\r)+/', variable_get('islandora_oai_collection_field', "RELS_EXT_isMemberOfCollection_uri_ms\nRELS_EXT_isMemberOf_uri_ms")) as $spec) {
       $mini_cache[] = trim($spec);
     }
     $mini_cache = array_filter($mini_cache);
@@ -614,7 +618,7 @@ function islandora_esdn_oai_get_membership_array() {
  *   returned from OAI requests.
  */
 function islandora_esdn_oai_get_restricted_models() {
-  $exclude_content_models = variable_get('islandora_esdn_oai_exclude_content_models', '');
+  $exclude_content_models = variable_get('islandora_oai_exclude_content_models', '');
   $cmodels = explode("\n", $exclude_content_models);
   $cmodels = array_map('trim', $cmodels);
   return array_filter($cmodels);
@@ -671,7 +675,7 @@ EOQ;
   // If the user is choosing to restrict things within the Islandora namespace
   // the filter needs to be modified as the islandora namespace is always
   // allowed by default.
-  if (variable_get('islandora_namespace_restriction_enforced', FALSE) && variable_get('islandora_esdn_oai_exclude_islandora_namespace', FALSE)) {
+  if (variable_get('islandora_namespace_restriction_enforced', FALSE) && variable_get('islandora_oai_exclude_islandora_namespace', FALSE)) {
     module_load_include('inc', 'islandora', 'includes/utilities');
     // This is somewhat of duplicated code but needs to be done so we remove
     // only the "islandora" namespace.
