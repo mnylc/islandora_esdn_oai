@@ -1,4 +1,4 @@
-# Islandora ESDN OAI 
+# Islandora ESDN OAI-PHM
 
 An OAI-PHM handler with tombstone handling(deleted record registry) for Islandora 7.x-1.x
 
