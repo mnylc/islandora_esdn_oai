@@ -108,7 +108,7 @@ function islandora_esdn_oai_islandora_object_purged($pid) {
           $rawPost .= '<field name="PID">'.$newpid.'</field>';
           $rawPost .= '<field name="siteName">huho</field>';
           $rawPost .= '<field name="PID_fullurl">http://localhost/~dpino/biodiversidad/islandora/object/'.$newpid.'</field>';
-          $rawPost .= '<field name="old_PID">'.htmlspecialchars(utf8_encode($pid),ENT_NOQUOTES, 'UTF-8').'</field>';
+          $rawPost .= '<field name="oai_real_PID">'.htmlspecialchars(utf8_encode($pid),ENT_NOQUOTES, 'UTF-8').'</field>';
           $rawPost .= '<field name="'.variable_get('islandora_oai_date_field', 'fgs_lastModifiedDate_dt').
             '">'.gmdate('Y-m-d\TH:i:s\Z', $timestamp_deleted).'</field>';
           $rawPost .= '<field name="tombstone">1</field>';
